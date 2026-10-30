@@ -31,3 +31,6 @@ rule:
     - Azure.Storage.SoftDelete
     - Azure.Storage.ContainerSoftDelete
     - Azure.Storage.Firewall
+    # Sandbox only: single-zone storage and an unreplicated workspace keep the demo cheap.
+    - Azure.Storage.UseReplication
+    - Azure.Log.Replication
