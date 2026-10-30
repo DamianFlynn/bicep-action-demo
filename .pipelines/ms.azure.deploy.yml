@@ -1,0 +1,389 @@
+trigger: none
+pr:
+  autoCancel: true
+  drafts: false
+
+name: Azure Deploy
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  #- group: NAME_OF_VARIABLE_GROUP_ooo_REMEMBER_TO_REMOVE_VARIABLES_BELOW_THAT_ARE_IN_THE_VARIABLE_GROUP
+  - name: ARTIFACT_IDENTIFIER
+    value: 1
+  - name: COST_THRESHOLD
+    value: 100
+  - name: DEPLOYMENT_MODE
+    value: stack
+  - name: ENVIRONMENT
+    value: demo
+  - name: IN_CURRENCY
+    value: EUR
+  - name: IN_LOCATION
+    value: westeurope
+  - name: IN_MANAGEMENT_GROUP
+    value:
+  - name: IN_PROVIDERS
+    value: Microsoft.OperationalInsights,Microsoft.Storage
+  - name: IN_RESOURCE_GROUP
+    value:
+  - name: IN_SCOPE
+    value: sub
+  - name: IN_SEVERITY
+    value: INFO
+  - name: IN_TEMPLATE
+    value: main.bicep
+  - name: IN_TEMPLATE_PARAMS
+    value: main.bicepparam
+  - name: PSRULE_AZURE_RESOURCE_MODULE_NOWARN
+    value: true
+  - name: RULE_BASELINE
+    value: Azure.Default
+  - name: RULE_MODULES
+    value: Az.Resources,PSRule.Rules.Azure
+  - name: RULE_OPTION
+    value: ps-rule.yaml
+  - name: SERVICE_CONNECTION
+    value: bicep-action-demo
+  - name: SUBSCRIPTION_ID
+    value: df56d048-2e20-4ab6-82b7-11643163aa53
+  - name: VERSION_ACE
+    value: 1.6.5
+  - name: WAIT_COUNT
+    value: 30
+  - name: WAIT_SECONDS
+    value: 10
+  - name: WORKFLOW_VERSION
+    value: main
+
+stages:
+  - stage: Plan
+    variables:
+      LOG_PATH: $(Pipeline.Workspace)/logs
+      RUN_ID: $(Build.BuildId)
+      SOURCE_PATH: $(Build.SourcesDirectory)
+    jobs:
+      - job: plan
+        displayName: Plan deployment
+        steps:
+          - checkout: self
+            displayName: Checkout
+            fetchDepth: 1
+            persistCredentials: true
+
+          - task: AzureCLI@2
+            displayName: Install tools
+            env:
+              LOG_NAME: install_tools
+              LOG_ORDER: b1
+            inputs:
+              azureSubscription: $(SERVICE_CONNECTION)
+              scriptLocation: inlineScript
+              scriptType: bash
+              inlineScript: |
+                declare -a SCRIPTS=(
+                  "az-bicep"
+                  "az-deploy"
+                  "azure-subscription"
+                  "bicep-version"
+                  "azure-cost"
+                  "bicep-snapshot"
+                  "install-tools"
+                  "pr-comment"
+                  "psrule-config"
+                  "psrule-report"
+                )
+                for SCRIPT in "${SCRIPTS[@]}"; do
+                  uri="https://github.com/innofactororg/bicep-action/raw/${WORKFLOW_VERSION}/scripts/${SCRIPT}.sh"
+                  HTTP_CODE=$(curl -sSL --remote-name --retry 4 \
+                    --write-out "%{response_code}" \
+                    --header 'Accept: application/vnd.github.raw' "${uri}"
+                  )
+                  if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -gt 299 ]; then
+                    echo "##[error]Unable to get ${uri}! Response code: ${HTTP_CODE}"
+                    exit 1
+                  fi
+                  chmod +x "${SCRIPT}.sh"
+                done
+                ./install-tools.sh
+
+          - task: AzureCLI@2
+            condition: and(succeeded(), not(startsWith(variables['IN_TEMPLATE'], '/subscriptions/')))
+            displayName: Bicep build
+            env:
+              LOG_NAME: bicep_build
+              LOG_ORDER: b3
+            name: bicep_build
+            inputs:
+              azureSubscription: $(SERVICE_CONNECTION)
+              scriptLocation: inlineScript
+              scriptType: bash
+              inlineScript: ./az-bicep.sh build
+
+          - task: AzureCLI@2
+            condition: and(succeeded(), not(eq(variables['IN_TEMPLATE_PARAMS'], '')))
+            displayName: Bicep build params
+            env:
+              LOG_NAME: bicep_build_params
+              LOG_ORDER: b4
+            name: bicep_build_params
+            inputs:
+              azureSubscription: $(SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: ./az-bicep.sh build-params
+
+          - task: AzureCLI@2
+            displayName: Validate
+            env:
+              LOG_NAME: validate
+              LOG_ORDER: b5
+            name: validate
+            inputs:
+              azureSubscription: $(SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: ./az-deploy.sh validate
+
+          - task: AzureCLI@2
+            displayName: What-if
+            env:
+              LOG_NAME: what-if
+              LOG_ORDER: a1
+            name: what_if
+            inputs:
+              azureSubscription: $(SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: ./az-deploy.sh what-if
+
+          - task: Bash@3
+            condition: and(succeeded(), not(eq(variables['RULE_OPTION'], '')))
+            displayName: PSRule config
+            env:
+              LOG_NAME: psrule_config
+              TEMPLATE_FILE: $(bicep_build.file)
+              TEMPLATE_PARAMS_FILE: $(bicep_build_params.file)
+            name: psrule_config
+            inputs:
+              targetType: inline
+              script: ./psrule-config.sh
+
+          - task: ps-rule-assert@2
+            condition: and(succeeded(), not(eq(variables['RULE_OPTION'], '')), eq(variables['psrule_config.error'], ''))
+            displayName: PSRule analysis
+            inputs:
+              baseline: $(RULE_BASELINE)
+              inputPath: $(Build.SourcesDirectory)
+              inputType: repository
+              modules: $(RULE_MODULES)
+              option: $(RULE_OPTION)
+              outputFormat: Markdown
+              outputPath: $(Pipeline.Workspace)/logs/psrule_analysis.md
+              summary: false
+
+          - task: Bash@3
+            condition: and(not(eq(variables['RULE_OPTION'], '')), or(succeeded(), failed()))
+            displayName: PSRule report
+            env:
+              CONFIG_ERROR: $(psrule_config.error)
+              LOG_NAME: psrule_report
+              LOG_ORDER: b6
+            inputs:
+              targetType: inline
+              script: ./psrule-report.sh
+
+          - task: AzureCLI@2
+            condition: and(succeeded(), not(eq(variables['VERSION_ACE'], '')), not(eq(variables['bicep_build.file'], '')))
+            displayName: Cost estimate
+            env:
+              LOG_NAME: cost_estimate
+              LOG_ORDER: a2
+              TEMPLATE_FILE: $(bicep_build.file)
+              TEMPLATE_PARAMS_FILE: $(bicep_build_params.file)
+            inputs:
+              azureSubscription: $(SERVICE_CONNECTION)
+              scriptLocation: inlineScript
+              scriptType: bash
+              inlineScript: ./azure-cost.sh
+
+          - task: AzureCLI@2
+            condition: and(succeeded(), contains(variables['IN_TEMPLATE_PARAMS'], '.bicepparam'))
+            displayName: Bicep snapshot
+            env:
+              LOG_NAME: bicep_snapshot
+              LOG_ORDER: a0
+            inputs:
+              azureSubscription: $(SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: ./bicep-snapshot.sh
+
+          - task: Bash@3
+            condition: and(always(), eq(variables['Build.Reason'], 'PullRequest'))
+            displayName: Add comment
+            env:
+              COMMENTS_URL: $(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)/threads?api-version=7.1-preview.1
+              COMMIT_SHA: $(System.PullRequest.SourceCommitId)
+              COMMIT_URL: $(System.CollectionUri)$(System.TeamProject)/_git/$(Build.Repository.Name)/commit/$(System.PullRequest.SourceCommitId)
+              EVENT_ACTION: $(Build.Reason)
+              EVENT_ACTOR: $(Build.SourceVersionAuthor)
+              EVENT_NO: "[$(System.PullRequest.PullRequestId)]($(Build.BuildUri))"
+              JOB_NAME: $(Build.BuildNumber)
+              JOB_STATUS: $(Agent.JobStatus)
+              JOB_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+              LOG_NAME: plan_comment
+              RUN_NUMBER: $(Build.BuildId)
+              TOKEN: $(System.AccessToken)
+            inputs:
+              targetType: inline
+              script: |
+                export COMMIT_SHA="[${COMMIT_SHA:0:8}](${COMMIT_URL})"
+                ./pr-comment.sh
+
+          - task: Bash@3
+            condition: or(failed(), and(succeeded(), not(eq(variables['IN_SEVERITY'], 'ERROR'))))
+            displayName: Show debug info
+            inputs:
+              targetType: inline
+              script: |
+                set -e
+                for var in $(compgen -e); do
+                  echo "${var} ${!var}"
+                done
+
+          - task: PublishPipelineArtifact@1
+            condition: always()
+            displayName: Upload logs
+            continueOnError: true
+            inputs:
+              artifact: "plan_logs_$(ARTIFACT_IDENTIFIER)_$(System.JobAttempt)"
+              publishLocation: pipeline
+              targetPath: $(Pipeline.Workspace)/logs
+
+  - stage: Deploy
+    dependsOn: Plan
+    variables:
+      LOG_PATH: $(Pipeline.Workspace)/logs
+      RUN_ID: $(Build.BuildId)
+      SOURCE_PATH: $(Build.SourcesDirectory)
+    jobs:
+      - deployment: create
+        displayName: Create deployment
+        environment: $(ENVIRONMENT)
+        variables:
+          IN_PROVIDERS: $[ stageDependencies.Plan.plan.outputs['validate.providers'] ]
+          BICEP_VERSION: $[ stageDependencies.Plan.plan.outputs['what_if.bicep_version'] ]
+          PLAN_STACK_SETTINGS: $[ stageDependencies.Plan.plan.outputs['what_if.stack_settings'] ]
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: none
+                - checkout: self
+                  displayName: Checkout
+                  fetchDepth: 1
+                  persistCredentials: true
+
+                - task: AzureCLI@2
+                  displayName: Install tools
+                  env:
+                    LOG_NAME: install_tools
+                    LOG_ORDER: b1
+                  inputs:
+                    azureSubscription: $(SERVICE_CONNECTION)
+                    scriptLocation: inlineScript
+                    scriptType: bash
+                    inlineScript: |
+                      declare -a SCRIPTS=(
+                        "az-deploy"
+                        "azure-subscription"
+                        "bicep-version"
+                        "azure-providers"
+                        "install-tools"
+                        "pr-comment"
+                      )
+                      for SCRIPT in "${SCRIPTS[@]}"; do
+                        uri="https://github.com/innofactororg/bicep-action/raw/${WORKFLOW_VERSION}/scripts/${SCRIPT}.sh"
+                        HTTP_CODE=$(curl -sSL --remote-name --retry 4 \
+                          --write-out "%{response_code}" \
+                          --header 'Accept: application/vnd.github.raw' "${uri}"
+                        )
+                        if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -gt 299 ]; then
+                          echo "##[error]Unable to get ${uri}! Response code: ${HTTP_CODE}"
+                          exit 1
+                        fi
+                        chmod +x "${SCRIPT}.sh"
+                      done
+                      ./install-tools.sh
+
+                - task: AzureCLI@2
+                  condition: and(succeeded(), not(eq(variables['plan_providers'], '')))
+                  displayName: Check Azure providers
+                  env:
+                    LOG_NAME: check_providers
+                    LOG_ORDER: b3
+                  inputs:
+                    azureSubscription: $(SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      if [[ "${IN_PROVIDERS}" == *plan_providers* ]]; then
+                        echo 'Skip! The plan.validate.providers output has not been set!'
+                        exit
+                      fi
+                      ./azure-providers.sh
+
+                - task: AzureCLI@2
+                  displayName: Deploy
+                  env:
+                    LOG_NAME: deploy
+                    LOG_ORDER: a1
+                  inputs:
+                    azureSubscription: $(SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: ./az-deploy.sh create
+
+                - task: Bash@3
+                  condition: and(always(), eq(variables['Build.Reason'], 'PullRequest'))
+                  displayName: Add comment
+                  env:
+                    COMMENTS_URL: $(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)/threads?api-version=7.1-preview.1
+                    COMMIT_SHA: $(System.PullRequest.SourceCommitId)
+                    COMMIT_URL: $(System.CollectionUri)$(System.TeamProject)/_git/$(Build.Repository.Name)/commit/$(System.PullRequest.SourceCommitId)
+                    EVENT_ACTION: $(Build.Reason)
+                    EVENT_ACTOR: $(Build.SourceVersionAuthor)
+                    EVENT_NO: "[$(System.PullRequest.PullRequestId)]($(Build.BuildUri))"
+                    JOB_NAME: $(Build.BuildNumber)
+                    JOB_STATUS: $(Agent.JobStatus)
+                    JOB_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+                    LOG_NAME: deploy_comment
+                    RUN_NUMBER: $(Build.BuildId)
+                    TOKEN: $(System.AccessToken)
+                  inputs:
+                    targetType: inline
+                    script: |
+                      export COMMIT_SHA="[${COMMIT_SHA:0:8}](${COMMIT_URL})"
+                      ./pr-comment.sh
+
+                - task: Bash@3
+                  condition: or(failed(), and(succeeded(), not(eq(variables['IN_SEVERITY'], 'ERROR'))))
+                  displayName: Show debug info
+                  inputs:
+                    targetType: inline
+                    script: |
+                      set -e
+                      for var in $(compgen -e); do
+                        echo "${var} ${!var}"
+                      done
+
+                - task: PublishPipelineArtifact@1
+                  displayName: Upload logs
+                  continueOnError: true
+                  condition: always()
+                  inputs:
+                    artifact: "deploy_logs_$(ARTIFACT_IDENTIFIER)_$(System.JobAttempt)"
+                    publishLocation: pipeline
+                    targetPath: $(Pipeline.Workspace)/logs
