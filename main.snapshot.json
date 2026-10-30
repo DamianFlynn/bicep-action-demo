@@ -1,0 +1,63 @@
+{
+  "predictedResources": [
+    {
+      "id": "/subscriptions/df56d048-2e20-4ab6-82b7-11643163aa53/resourceGroups/rg-bicep-action-demo",
+      "type": "Microsoft.Resources/resourceGroups",
+      "name": "rg-bicep-action-demo",
+      "apiVersion": "2024-03-01",
+      "location": "westeurope",
+      "tags": {
+        "environment": "demo",
+        "source": "bicep-action-demo"
+      }
+    },
+    {
+      "id": "/subscriptions/df56d048-2e20-4ab6-82b7-11643163aa53/resourceGroups/rg-bicep-action-demo/providers/Microsoft.OperationalInsights/workspaces/log-demo-bi32ax5amge7i",
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "name": "log-demo-bi32ax5amge7i",
+      "apiVersion": "2023-09-01",
+      "location": "westeurope",
+      "tags": {
+        "environment": "demo",
+        "source": "bicep-action-demo"
+      },
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 30
+      }
+    },
+    {
+      "id": "/subscriptions/df56d048-2e20-4ab6-82b7-11643163aa53/resourceGroups/rg-bicep-action-demo/providers/Microsoft.Storage/storageAccounts/stdemobi32ax5amge7i",
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "stdemobi32ax5amge7i",
+      "apiVersion": "2023-05-01",
+      "location": "westeurope",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "tags": {
+        "environment": "demo",
+        "source": "bicep-action-demo"
+      },
+      "properties": {
+        "accessTier": "Hot",
+        "allowBlobPublicAccess": false,
+        "allowSharedKeyAccess": false,
+        "minimumTlsVersion": "TLS1_2",
+        "publicNetworkAccess": "Disabled",
+        "supportsHttpsTrafficOnly": true
+      }
+    }
+  ],
+  "diagnostics": [],
+  "outputs": {
+    "resourceGroupName": "rg-bicep-action-demo",
+    "storageAccountName": "stdemobi32ax5amge7i"
+  },
+  "metadata": {
+    "bicepVersion": "0.48.1"
+  }
+}
