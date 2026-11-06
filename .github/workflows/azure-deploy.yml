@@ -41,11 +41,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Plan
         id: plan
-        uses: innofactororg/bicep-action/.github/actions/plan@v1
+        uses: innofactororg/bicep-action/.github/actions/plan@fix/node24-actions
         with:
           azure_client_id: ${{ env.azure_client_id }}
           azure_providers: ${{ env.azure_providers }}
@@ -73,11 +73,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Deploy
         id: deploy
-        uses: innofactororg/bicep-action/.github/actions/deploy@v1
+        uses: innofactororg/bicep-action/.github/actions/deploy@fix/node24-actions
         with:
           azure_client_id: ${{ env.azure_client_id }}
           azure_providers: ${{ needs.plan.outputs.providers }}

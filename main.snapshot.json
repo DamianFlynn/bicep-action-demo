@@ -8,7 +8,8 @@
       "location": "westeurope",
       "tags": {
         "environment": "demo",
-        "source": "bicep-action-demo"
+        "source": "bicep-action-demo",
+        "owner": "platform"
       }
     },
     {
@@ -19,7 +20,8 @@
       "location": "westeurope",
       "tags": {
         "environment": "demo",
-        "source": "bicep-action-demo"
+        "source": "bicep-action-demo",
+        "owner": "platform"
       },
       "properties": {
         "sku": {
@@ -40,7 +42,8 @@
       "kind": "StorageV2",
       "tags": {
         "environment": "demo",
-        "source": "bicep-action-demo"
+        "source": "bicep-action-demo",
+        "owner": "platform"
       },
       "properties": {
         "accessTier": "Hot",
