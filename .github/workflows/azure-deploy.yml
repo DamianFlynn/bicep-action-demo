@@ -45,7 +45,7 @@ jobs:
 
       - name: Plan
         id: plan
-        uses: innofactororg/bicep-action/.github/actions/plan@fix/node24-actions
+        uses: innofactororg/bicep-action/.github/actions/plan@v1
         with:
           azure_client_id: ${{ env.azure_client_id }}
           azure_providers: ${{ env.azure_providers }}
@@ -77,7 +77,7 @@ jobs:
 
       - name: Deploy
         id: deploy
-        uses: innofactororg/bicep-action/.github/actions/deploy@fix/node24-actions
+        uses: innofactororg/bicep-action/.github/actions/deploy@v1
         with:
           azure_client_id: ${{ env.azure_client_id }}
           azure_providers: ${{ needs.plan.outputs.providers }}
